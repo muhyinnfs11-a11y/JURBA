@@ -1,6 +1,6 @@
 // Service worker - Jurnal Guru SDN 1 Baharu Utara
 // Naikkan angka VERSI setiap kali ada perubahan besar agar cache lama dibersihkan.
-const VERSI = 'jurnal-v5';
+const VERSI = 'jurnal-v7';
 const INTI = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png'];
 const XLSX_URL = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
 
