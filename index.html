@@ -593,6 +593,34 @@ html[data-tema="gelap"] input,html[data-tema="gelap"] select,html[data-tema="gel
       </div>
     </div>
 
+    <div class="kartu" id="kartu-impor">
+      <style>.tbl-impor{width:100%;border-collapse:collapse;font-size:12.5px}.tbl-impor th,.tbl-impor td{padding:7px 9px;border-bottom:1px solid var(--garis);text-align:left;vertical-align:top}.tbl-impor th{background:var(--thead,var(--krem));position:sticky;top:0;white-space:nowrap}</style>
+      <h2>📥 Impor Laporan dari CSV</h2>
+      <p class="ket">Isi laporan lebih dulu di Excel atau Google Sheets memakai template, simpan sebagai CSV, lalu impor di sini. Isinya diperiksa dan ditampilkan dulu sebelum disimpan.</p>
+      <div class="baris-aksi">
+        <button class="btn btn-emas" id="btn-template-csv" type="button">⬇️ Unduh Template CSV</button>
+        <button class="btn btn-teal" id="btn-pilih-csv" type="button">📂 Pilih File CSV</button>
+        <input type="file" id="file-csv" accept=".csv,.txt,text/csv" style="display:none;">
+      </div>
+      <div class="field" style="max-width:360px;margin-top:12px;">
+        <label>Jika tanggal sudah ada di aplikasi</label>
+        <select id="impor-mode"><option value="tambah">Tambahkan sebagai laporan baru (tanggal sama boleh)</option><option value="lewati">Lewati tanggal yang sudah ada laporannya</option><option value="timpa">Timpa laporan pertama di tanggal itu</option></select>
+      </div>
+      <details style="margin-top:6px;font-size:13px;color:var(--tinta-lembut);">
+        <summary style="cursor:pointer;font-weight:700;">Petunjuk pengisian</summary>
+        <ul style="margin:8px 0 0 18px;line-height:1.7;">
+          <li><b>tanggal</b>: 2026-11-02 atau 02/11/2026.</li>
+          <li><b>status</b>: Hadir, Izin, Sakit, Dinas Luar, atau Tanggal Merah (kosong dianggap Hadir).</li>
+          <li><b>jam_mulai / jam_selesai</b>: format 07:00. Kosong berarti 07:00 dan 13:00. Hanya dipakai untuk status Hadir.</li>
+          <li><b>uraian_kegiatan</b>: wajib, kecuali Tanggal Merah. Untuk Izin, Sakit, dan Dinas Luar, isi dengan alasannya.</li>
+          <li>Tanggal yang sama boleh muncul beberapa kali di file (beberapa kegiatan dalam sehari), semuanya disimpan. Hanya baris yang isinya persis sama yang dilewati agar tidak dobel.</li>
+          <li>Hapus 3 baris contoh pada template sebelum mengisi. Maksimal 200 baris per impor.</li>
+          <li>Jika semua kolom menumpuk di satu kolom saat dibuka di Excel, buka file lewat Google Sheets atau gunakan Data, lalu Text to Columns (pemisah titik koma).</li>
+        </ul>
+      </details>
+      <div id="impor-hasil"></div>
+    </div>
+
     <div class="kartu">
       <h2>🗂️ Laporan Tersimpan</h2>
       <p class="ket">Urut dari yang terbaru.</p>
@@ -2004,6 +2032,188 @@ html[data-tema="gelap"] input,html[data-tema="gelap"] select,html[data-tema="gel
     $("btn-masuk").disabled = false;
     $("btn-masuk").textContent = "🔐 Masuk";
   })();
+
+
+  // ===================== IMPOR CSV (tambahan) =====================
+  //#PURE-START
+  var ALIAS_CSV = {tanggal:["tanggal","tgl"],status:["status","statuskehadiran","kehadiran"],jamMasuk:["jammulai","jammasuk","darijam"],jamPulang:["jamselesai","jampulang","sampaijam"],kelas:["kelas","kelasmapel","mapel","kelasmatapelajaran"],tujuanPembelajaran:["tujuanpembelajaran","tujuan"],uraian:["uraiankegiatan","uraian","materi","alasan"],keterangan:["keterangan","penilaian","ket"]};
+  function csvParse(t){
+    t = String(t).replace(/^\uFEFF/, "");
+    var first = t.split(/\r?\n/)[0] || "";
+    var d = [";", ",", "\t"].map(function(c){ return [c, first.split(c).length]; }).sort(function(a,b){ return b[1]-a[1]; })[0][0];
+    var rows = [], row = [], f = "", q = false;
+    for(var i=0;i<t.length;i++){
+      var c = t[i];
+      if(q){ if(c==='"'){ if(t[i+1]==='"'){ f+='"'; i++; } else q=false; } else f+=c; }
+      else if(c==='"') q = true;
+      else if(c===d){ row.push(f); f=""; }
+      else if(c==="\n" || c==="\r"){ if(c==="\r" && t[i+1]==="\n") i++; row.push(f); f=""; rows.push(row); row=[]; }
+      else f += c;
+    }
+    if(f!=="" || row.length){ row.push(f); rows.push(row); }
+    return rows.filter(function(r){ return r.some(function(x){ return String(x).trim()!==""; }); });
+  }
+  function csvTgl(s){
+    s = String(s||"").trim(); var m, y, mo, d;
+    if((m = s.match(/^(\d{4})[-\/.](\d{1,2})[-\/.](\d{1,2})/))){ y=+m[1]; mo=+m[2]; d=+m[3]; }
+    else if((m = s.match(/^(\d{1,2})[-\/.](\d{1,2})[-\/.](\d{2,4})/))){ d=+m[1]; mo=+m[2]; y=+m[3]; if(y<100) y+=2000; }
+    else return null;
+    if(y<2000 || y>2100) return null;
+    var dt = new Date(Date.UTC(y, mo-1, d));
+    if(dt.getUTCFullYear()!==y || dt.getUTCMonth()!==mo-1 || dt.getUTCDate()!==d) return null;
+    return y + "-" + (mo<10?"0":"") + mo + "-" + (d<10?"0":"") + d;
+  }
+  function csvJam(s){
+    s = String(s||"").trim(); if(!s) return "";
+    var m = s.match(/^(\d{1,2})[:.](\d{2})(?:[:.]\d{2})?$/); if(!m) return null;
+    var h = +m[1], mi = +m[2]; if(h>23 || mi>59) return null;
+    return (h<10?"0":"") + h + ":" + m[2];
+  }
+  function csvStatus(s){
+    var k = String(s||"").toLowerCase().replace(/[^a-z]/g, ""); if(!k) return "Hadir";
+    var p = {hadir:"Hadir", izin:"Izin", sakit:"Sakit", dinasluar:"Dinas Luar", dl:"Dinas Luar", tanggalmerah:"Tanggal Merah", libur:"Tanggal Merah", merah:"Tanggal Merah"};
+    return p[k] || null;
+  }
+  function csvPeriksa(r){
+    var tgl = csvTgl(r.tanggal); if(!tgl) return {err:"Tanggal tidak valid (pakai YYYY-MM-DD atau DD/MM/YYYY)"};
+    var st = csvStatus(r.status); if(!st) return {err:"Status tidak dikenali (Hadir, Izin, Sakit, Dinas Luar, Tanggal Merah)"};
+    var ur = String(r.uraian||"").trim();
+    if(st!=="Tanggal Merah" && !ur) return {err:(st==="Hadir" ? "Uraian kegiatan" : "Alasan "+st) + " wajib diisi"};
+    var e = {tanggal:tgl, status:st, jamMasuk:"", jamPulang:"", kelas:"", tujuanPembelajaran:"", uraian:(st==="Tanggal Merah" ? "" : ur), keterangan:String(r.keterangan||"").trim()};
+    if(st==="Hadir"){
+      var jm = csvJam(r.jamMasuk), jp = csvJam(r.jamPulang);
+      if(jm===null || jp===null) return {err:"Format jam tidak valid (pakai HH:MM, contoh 07:00)"};
+      e.jamMasuk = jm || "07:00"; e.jamPulang = jp || "13:00";
+      e.kelas = String(r.kelas||"").trim(); e.tujuanPembelajaran = String(r.tujuanPembelajaran||"").trim();
+    }
+    return {entry:e};
+  }
+  function csvPeta(header){
+    var peta = {};
+    header.forEach(function(h,i){
+      var k = String(h).toLowerCase().replace(/[^a-z]/g, "");
+      Object.keys(ALIAS_CSV).forEach(function(f){ if(peta[f]===undefined && ALIAS_CSV[f].indexOf(k)>-1) peta[f]=i; });
+    });
+    return peta;
+  }
+  //#PURE-END
+
+  var csvBaris = null, csvHasil = [], csvJalan = false;
+
+  function csvUnduhTemplate(){
+    function esc(v){ v = String(v); return /[;"\r\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }
+    var rows = [
+      ["tanggal","status","jam_mulai","jam_selesai","kelas","tujuan_pembelajaran","uraian_kegiatan","keterangan"],
+      ["2026-11-02","Hadir","07:00","13:00","Kelas IV - Tematik","Siswa mampu menjelaskan daur air","Mengajar tema 2 subtema 1 dan mengoreksi tugas siswa","85% siswa mencapai KKM"],
+      ["2026-11-03","Sakit","","","","","Demam tinggi, istirahat di rumah","Surat dokter dilampirkan"],
+      ["2026-11-04","Tanggal Merah","","","","","","Libur nasional"]
+    ];
+    var csv = "\uFEFF" + rows.map(function(r){ return r.map(esc).join(";"); }).join("\r\n") + "\r\n";
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([csv], {type:"text/csv;charset=utf-8"}));
+    a.download = "Template_Impor_Laporan_JURBA.csv";
+    document.body.appendChild(a); a.click();
+    setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); }, 800);
+    toast("Template diunduh. Hapus 3 baris contoh sebelum mengisi.");
+  }
+
+  function csvSiapkan(){
+    if(!csvBaris) return;
+    var box = $("impor-hasil"), peta = csvPeta(csvBaris[0]);
+    if(peta.tanggal===undefined || peta.uraian===undefined){
+      csvHasil = [];
+      box.innerHTML = '<p style="color:var(--rose);font-weight:700;margin-top:14px;">❌ Kolom "tanggal" dan "uraian_kegiatan" tidak ditemukan. Gunakan template dari tombol Unduh Template CSV.</p>';
+      return;
+    }
+    if(csvBaris.length-1 > 200){
+      csvHasil = [];
+      box.innerHTML = '<p style="color:var(--rose);font-weight:700;margin-top:14px;">❌ Maksimal 200 baris per impor. File ini berisi ' + (csvBaris.length-1) + ' baris, silakan dibagi dua.</p>';
+      return;
+    }
+    var mode = $("impor-mode").value, ada = {}, kembar = {}, terpakai = {};
+    function kunci(t, s, k, u, ket){ return [t, s, k, u, ket].map(function(x){ return String(x==null ? "" : x).trim().toLowerCase(); }).join("|"); }
+    entries.forEach(function(e){
+      if(!ada[e.tanggal]) ada[e.tanggal] = e;
+      kembar[kunci(e.tanggal, e.status, e.kelas, e.uraian, e.keterangan)] = 1;
+    });
+    csvHasil = [];
+    csvBaris.slice(1).forEach(function(row, i){
+      var r = {}; Object.keys(peta).forEach(function(f){ r[f] = row[peta[f]]; });
+      var p = csvPeriksa(r), h = {baris:i+2, tgl:r.tanggal||"", status:r.status||"", uraian:r.uraian||""};
+      if(p.err){ h.aksi = "error"; h.pesan = p.err; }
+      else {
+        h.entry = p.entry; h.tgl = p.entry.tanggal; h.status = p.entry.status; h.uraian = p.entry.uraian;
+        var kk = kunci(h.tgl, h.entry.status, h.entry.kelas, h.entry.uraian, h.entry.keterangan);
+        if(kembar[kk]){ h.aksi = "lewati"; h.pesan = (kembar[kk]===1 ? "isinya persis sama dengan laporan yang sudah ada" : "isinya persis sama dengan baris lain di file"); }
+        else {
+          kembar[kk] = 2;
+          if(ada[h.tgl] && mode==="lewati"){ h.aksi = "lewati"; h.pesan = "sudah ada laporan di tanggal ini"; }
+          else if(ada[h.tgl] && mode==="timpa" && !terpakai[h.tgl]){ terpakai[h.tgl] = 1; h.entry.id = ada[h.tgl].id; h.aksi = "timpa"; }
+          else { h.entry.id = Date.now() + "-" + Math.random().toString(36).slice(2,7); h.aksi = "baru"; }
+        }
+      }
+      csvHasil.push(h);
+    });
+    csvTampil();
+  }
+
+  function csvTampil(){
+    var c = {baru:0, timpa:0, lewati:0, error:0, selesai:0};
+    csvHasil.forEach(function(h){ c[h.aksi]++; });
+    var siap = c.baru + c.timpa;
+    var label = {baru:"✅ Baru", timpa:"♻️ Ditimpa", selesai:"💾 Tersimpan"};
+    var html = '<p style="margin:16px 0 8px;font-weight:700;">' + csvHasil.length + ' baris dibaca: <span style="color:var(--hijau);">' + c.baru + ' baru</span>' +
+      (c.timpa ? ", " + c.timpa + " ditimpa" : "") + (c.lewati ? ", " + c.lewati + " dilewati" : "") +
+      (c.error ? ', <span style="color:var(--rose);">' + c.error + " bermasalah</span>" : "") + (c.selesai ? ", " + c.selesai + " tersimpan" : "") + "</p>";
+    html += '<div style="overflow:auto;max-height:340px;border:1px solid var(--garis);border-radius:12px;"><table class="tbl-impor"><thead><tr><th>Baris</th><th>Tanggal</th><th>Status</th><th>Uraian</th><th>Hasil</th></tr></thead><tbody>' +
+      csvHasil.map(function(h){
+        var u = String(h.uraian||""); if(u.length>60) u = u.slice(0,60) + "…";
+        var hasil = label[h.aksi] || ((h.aksi==="error" ? "❌ " : "⏭️ ") + escapeHtml(h.pesan||""));
+        return "<tr><td>" + h.baris + "</td><td>" + escapeHtml(h.tgl) + "</td><td>" + escapeHtml(h.status) + "</td><td>" + escapeHtml(u) + "</td><td>" + hasil + "</td></tr>";
+      }).join("") + "</tbody></table></div>";
+    html += '<p id="impor-prog" class="ket" style="margin:10px 0 0;"></p><div class="baris-aksi">' +
+      (siap ? '<button class="btn btn-utama" id="btn-jalankan-impor" type="button">✅ Simpan ' + siap + ' Laporan</button>' : "") +
+      '<button class="btn btn-luar" id="btn-batal-impor" type="button">Tutup</button></div>';
+    $("impor-hasil").innerHTML = html;
+    if(siap) $("btn-jalankan-impor").addEventListener("click", csvJalankan);
+    $("btn-batal-impor").addEventListener("click", function(){ if(csvJalan) return; csvBaris = null; csvHasil = []; $("impor-hasil").innerHTML = ""; });
+  }
+
+  async function csvJalankan(){
+    if(csvJalan) return;
+    var todo = csvHasil.filter(function(h){ return h.aksi==="baru" || h.aksi==="timpa"; });
+    if(!todo.length) return;
+    csvJalan = true; $("btn-jalankan-impor").disabled = true;
+    var ok = 0, gagal = 0;
+    for(var k=0;k<todo.length;k++){
+      var h = todo[k];
+      $("impor-prog").textContent = "Menyimpan " + (k+1) + " dari " + todo.length + "… jangan tutup halaman ini.";
+      try{
+        await apiCall("saveEntry", { username: currentUser.username, password: currentUser.password, entry: h.entry });
+        var idx = entries.findIndex(function(e){ return e.id===h.entry.id; });
+        if(idx>-1) entries[idx] = h.entry; else entries.push(h.entry);
+        h.aksi = "selesai"; ok++;
+      }catch(e){ h.aksi = "error"; h.pesan = "Gagal menyimpan: " + e.message; gagal++; }
+    }
+    csvJalan = false;
+    renderDaftar();
+    toast(ok + " laporan berhasil diimpor" + (gagal ? ", " + gagal + " gagal." : ". 🎉"));
+    csvTampil();
+  }
+
+  $("btn-template-csv").addEventListener("click", csvUnduhTemplate);
+  $("btn-pilih-csv").addEventListener("click", function(){ $("file-csv").click(); });
+  $("impor-mode").addEventListener("change", csvSiapkan);
+  $("file-csv").addEventListener("change", function(ev){
+    var f = ev.target.files && ev.target.files[0]; if(!f) return;
+    f.text().then(function(t){
+      var rows = csvParse(t);
+      if(rows.length < 2){ toast("File kosong atau hanya berisi judul kolom."); return; }
+      csvBaris = rows; csvSiapkan();
+    }).catch(function(){ toast("File tidak bisa dibaca."); });
+    ev.target.value = "";
+  });
+  $("btn-keluar").addEventListener("click", function(){ csvBaris = null; csvHasil = []; $("impor-hasil").innerHTML = ""; });
 
 })();
 </script>
